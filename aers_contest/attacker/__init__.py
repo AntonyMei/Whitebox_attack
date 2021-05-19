@@ -1,0 +1,119 @@
+import numpy as np
+import attacker.util as util
+import tensorflow as tf
+from ares.attack.base import BatchAttack
+from ares.attack.utils import get_xs_ph, get_ys_ph, maybe_to_array
+from ares.loss import CrossEntropyLoss
+
+# base PGD attacker
+class Attacker(BatchAttack):
+    def __init__(self, model, batch_size, dataset, session):
+        ''' Based on ares.attack.bim.BIM '''
+        self.model, self.batch_size, self._session = model, batch_size, session
+
+        # dataset == "imagenet" or "cifar10"
+        # loss = CrossEntropyLoss(self.model)
+
+        # placeholder for batch_attack's input
+        self.xs_ph = get_xs_ph(model, batch_size)
+        self.ys_ph = get_ys_ph(model, batch_size)
+
+
+        # flatten shape of xs_ph
+        xs_flatten_shape = (batch_size, np.prod(self.model.x_shape))
+
+        # store xs and ys in variables to reduce memory copy between tensorflow and python
+        # variable for the original example with shape of (batch_size, D)
+        self.xs_var = tf.Variable(tf.zeros(shape=xs_flatten_shape, dtype=self.model.x_dtype))
+
+        # variable for labels
+        self.ys_var = tf.Variable(tf.zeros(shape=(batch_size,), dtype=self.model.y_dtype))
+
+        # variable for the (hopefully) adversarial example with shape of (batch_size, D)
+        self.xs_adv_var = tf.Variable(tf.zeros(shape=xs_flatten_shape, dtype=self.model.x_dtype))
+
+        # magnitude
+        self.eps_ph = tf.placeholder(self.model.x_dtype, (self.batch_size,))
+        self.eps_var = tf.Variable(tf.zeros((self.batch_size,), dtype=self.model.x_dtype))
+
+        # step size
+        self.alpha_ph = tf.placeholder(self.model.x_dtype, (self.batch_size,))
+        self.alpha_var = tf.Variable(tf.zeros((self.batch_size,), dtype=self.model.x_dtype))
+
+
+        # expand dim for easier broadcast operations
+        eps = tf.expand_dims(self.eps_var, 1)
+        alpha = tf.expand_dims(self.alpha_var, 1)
+
+        # TODO: check momentum size(wwh)
+        # self.momentum_ph = tf.placeholder(self.model.x_dtype, (self.batch_size,))
+        # self.momentum_var = tf.Variable(tf.zeros((self.batch_size,), dtype = self.model.x_dtype))
+        momentum = tf.constant(0.75)
+
+        # TODO: check initialize
+        self.setup_xs = [self.xs_var.assign(tf.reshape(self.xs_ph, xs_flatten_shape)),
+                         self.xs_adv_var.assign(tf.reshape(self.xs_ph, xs_flatten_shape))]
+        self.setup_ys = self.ys_var.assign(self.ys_ph)
+        # 2 losses
+        loss0 = util.dlr_loss(self.setup_xs, self.setup_ys, self.model.n_class)
+        grad = tf.gradients(loss0, self.setup_xs)[0]
+
+        xs_lo, xs_hi = self.xs_var - eps, self.xs_var + eps
+        # clip by max l_inf magnitude of adversarial noise
+        x1 = tf.clip_by_value(self.xs_adv_var + alpha * grad, xs_lo, xs_hi)
+
+        # update the adversarial example
+        loss1 = util.dlr_loss(x1, self.ys_var, self.model.n_class)
+        self.loss_max = max(self.loss, loss1)
+        if self.loss < loss1:
+            self.x_max = self.setup_xs
+        else:
+            self.x_max = x1
+
+        # start iterate
+        # calculate loss' gradient with relate to the adversarial example
+        # grad.shape == (batch_size, D)
+        self.xs_adv_model = tf.reshape(self.xs_adv_var, (batch_size, *self.model.x_shape))
+        self.loss = util.dlr_loss(self.xs_adv_model, self.ys_var, self.model.n_class)
+        grad = tf.gradients(self.loss, self.xs_adv_var)[0]
+
+        # update the adversarial example
+        xs_lo, xs_hi = self.xs_var - eps, self.xs_var + eps
+
+        # clip by max l_inf magnitude of adversarial noise
+        xs_adv_next = tf.clip_by_value(self.xs_adv_var + alpha * grad, xs_lo, xs_hi) # wwh: z_k+1
+        xs_adv_next = tf.clip_by_value(self.xs_adv_var + momentum * (xs_adv_next - self.xs_adv_var) + (1 - momentum))
+
+        loss_next = util.dlr_loss(xs_adv_next, self.ys_var, self.model.n_class)
+        if loss_next > self.loss_max:
+            self.x_max = xs_adv_next
+            self.loss_max = loss_next
+
+        # clip by (x_min, x_max)
+        xs_adv_next = tf.clip_by_value(xs_adv_next, self.model.x_min, self.model.x_max)
+
+        self.update_xs_adv_step = self.xs_adv_var.assign(xs_adv_next)
+        self.config_eps_step = self.eps_var.assign(self.eps_ph)
+        self.config_alpha_step = self.alpha_var.assign(self.alpha_ph)
+
+        # TODO: check the number of iterations
+        self.iteration = 100
+
+    def config(self, **kwargs):
+        if 'magnitude' in kwargs:
+            self.eps = kwargs['magnitude'] - 1e-6
+            eps = maybe_to_array(self.eps, self.batch_size)
+            self._session.run(self.config_eps_step, feed_dict={self.eps_ph: eps})
+            self._session.run(self.config_alpha_step, feed_dict={self.alpha_ph: eps / 7})
+            # TODO (wwh): add momentum initialize here
+            pass
+
+    def batch_attack(self, xs, ys=None, ys_target=None):
+        self._session.run(self.setup_xs, feed_dict={self.xs_ph: xs})
+        self._session.run(self.setup_ys, feed_dict={self.ys_ph: ys})
+        self._session.run(self.x_max, feed_dict={self.xs_ph:xs, self.ys_ph:ys})
+        self._session.run(self.loss_max, feed_dict={self.xs_ph:xs, self.ys_ph:ys})
+        # wwh: range -1 because of computation of x_max above
+        for _ in range(self.iteration - 1):
+            self._session.run(self.update_xs_adv_step)
+        return self._session.run(self.xs_adv_model)
