@@ -25,6 +25,7 @@ class Attacker(BatchAttack):
         self.last_loss = 0
         self.last_alpha = 0
         self.last_max_f = 0
+        self.loss = 0
 
         # Init checkpoints for alpha
         for i in range(self.checkpoint_count - 2):
@@ -75,8 +76,9 @@ class Attacker(BatchAttack):
                          self.xs_adv_var.assign(tf.reshape(self.xs_ph, xs_flatten_shape))]
         self.setup_ys = self.ys_var.assign(self.ys_ph)
         # 2 losses
-        loss0 = util.dlr_loss(self.setup_xs, self.setup_ys, self.model.n_class)
-        grad = tf.gradients(loss0, self.setup_xs)[0]
+        self.loss = util.dlr_loss(self.xs_var, self.ys_var, self.model.n_class)
+        print(self.loss)
+        grad = tf.gradients(self.loss, self.xs_var)[0]
 
         xs_lo, xs_hi = self.xs_var - eps, self.xs_var + eps
         # clip by max l_inf magnitude of adversarial noise
@@ -84,7 +86,8 @@ class Attacker(BatchAttack):
 
         # update the adversarial example
         loss1 = util.dlr_loss(x1, self.ys_var, self.model.n_class)
-        self.loss_max = max(self.loss, loss1)
+        print(loss1)
+        self.loss_max = tf.reduce_max([self.loss, loss1])
         if self.loss < loss1:
             self.x_max = self.setup_xs
         else:
@@ -126,31 +129,27 @@ class Attacker(BatchAttack):
         self.current_iteration += 1
 
         # update loss
-        if (self.loss > self.last_loss):
+        if self.loss > self.last_loss:
             self.better_f_count += 1
         self.last_loss = self.loss
 
         # update alpha
         for j in range(self.checkpoint_count):
             if self.current_iteration == self.checkpoint[j]:
-
                 # check condition 1
                 condition1 = False
                 interval_length = self.checkpoint[j] - self.checkpoint[j - 1]
                 hit_count = interval_length * self.rho
-                if (self.better_f_count < hit_count):
+                if self.better_f_count < hit_count:
                     condition1 = True
-
                 # check condition 2
                 condition2 = False
-                if (self.last_alpha == self.local_alpha and self.last_max_f == self.loss_max):
+                if self.last_alpha == self.local_alpha and self.last_max_f == self.loss_max:
                     condition2 = True
-
                 # update parameters
                 self.better_f_count = 0
                 self.last_alpha = self.local_alpha
                 self.last_max_f = self.loss_max
-
                 # halve alpha if necessary
                 if condition1 or condition2:
                     self.local_alpha /= 2
@@ -159,7 +158,6 @@ class Attacker(BatchAttack):
 
         return self.local_alpha
 
-
     def config(self, **kwargs):
         if 'magnitude' in kwargs:
             self.eps = kwargs['magnitude'] - 1e-6
@@ -167,8 +165,6 @@ class Attacker(BatchAttack):
             self._session.run(self.config_eps_step, feed_dict={self.eps_ph: eps})
             self._session.run(self.config_alpha_step, feed_dict={self.alpha_ph: self.eps * 2})
             self.local_alpha = self.eps * 2
-            # TODO (wwh): add momentum initialize here
-            pass
 
     def batch_attack(self, xs, ys=None, ys_target=None):
         self._session.run(self.setup_xs, feed_dict={self.xs_ph: xs})
@@ -178,5 +174,6 @@ class Attacker(BatchAttack):
         # wwh: range -1 because of computation of x_max above
         for _ in range(self.iteration - 1):
             self._session.run(self.config_alpha_step, feed_dict={self.alpha_ph: self.calculate_alpha()})
+            self._session.run(self.loss_max, feed_dict={})
             self._session.run(self.update_xs_adv_step)
         return self._session.run(self.xs_adv_model)
