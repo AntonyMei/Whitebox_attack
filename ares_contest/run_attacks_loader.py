@@ -1,7 +1,7 @@
 import argparse
 import os
 import numpy as np
-import tensorflow as tf
+import tensorflow.compat.v1 as tf
 from ares.dataset import cifar10, imagenet, dataset_to_iterator
 from ares.model import load_model_from_path
 

@@ -13,7 +13,7 @@ import sys
 import argparse
 import shutil
 import numpy as np
-import tensorflow as tf
+import tensorflow.compat.v1 as tf
 from ares.model import load_model_from_path
 from ares.dataset import cifar10, imagenet, dataset_to_iterator
 

@@ -1,6 +1,6 @@
 import numpy as np
 import attacker.util as util
-import tensorflow as tf
+import tensorflow.compat.v1 as tf
 from ares.attack.base import BatchAttack
 from ares.attack.utils import get_xs_ph, get_ys_ph, maybe_to_array
 from ares.loss import CrossEntropyLoss

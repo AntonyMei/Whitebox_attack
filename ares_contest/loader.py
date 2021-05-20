@@ -9,7 +9,7 @@ import pwd, grp, sys
 from mpi4py import MPI
 import traceback
 import numpy as np
-import tensorflow as tf
+import tensorflow.compat.v1 as tf
 from ares.model import ClassifierWithLogits
 from ares.dataset import cifar10, imagenet, dataset_to_iterator
 
