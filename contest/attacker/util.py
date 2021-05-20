@@ -1,5 +1,5 @@
 import numpy as np
-import tensorflow.compat.v1 as tf
+import tensorflow as tf
 
 def dlr_loss(x, y, num_classes = 10):
     x_sort = tf.contrib.framework.sort(x, axis = 1)
