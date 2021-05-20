@@ -18,8 +18,13 @@ class Attacker(BatchAttack):
         self.p = [0, 0.22]
         self.checkpoint = []
         # Counters for alpha
+        self.local_alpha = 0
         self.rho = 0.75
-        self.iteration = 0
+        self.current_iteration = 0
+        self.better_f_count = 0
+        self.last_loss = 0
+        self.last_alpha = 0
+        self.last_max_f = 0
 
         # Init checkpoints for alpha
         for i in range(self.checkpoint_count - 2):
@@ -96,16 +101,18 @@ class Attacker(BatchAttack):
         xs_lo, xs_hi = self.xs_var - eps, self.xs_var + eps
 
         # clip by max l_inf magnitude of adversarial noise
-        xs_adv_next = tf.clip_by_value(self.xs_adv_var + alpha * grad, xs_lo, xs_hi)  # wwh: z_k+1
-        xs_adv_next = tf.clip_by_value(self.xs_adv_var + momentum * (xs_adv_next - self.xs_adv_var) + (1 - momentum))
+        self.xs_adv_var_temp1 = tf.Variable(tf.zeros(shape=xs_flatten_shape, dtype=self.model.x_dtype))
+        self.xs_adv_var_temp2 = tf.Variable(tf.zeros(shape=xs_flatten_shape, dtype=self.model.x_dtype))
+        xs_adv_next_temp1 = tf.clip_by_value(self.xs_adv_var + alpha * grad, xs_lo, xs_hi)  # wwh: z_k+1
+        xs_adv_next_temp2 = tf.clip_by_value(self.xs_adv_var + momentum * (xs_adv_next_temp1 - self.xs_adv_var) + (1 - momentum))
 
-        loss_next = util.dlr_loss(xs_adv_next, self.ys_var, self.model.n_class)
+        loss_next = util.dlr_loss(xs_adv_next_temp2, self.ys_var, self.model.n_class)
         if loss_next > self.loss_max:
-            self.x_max = xs_adv_next
+            self.x_max = xs_adv_next_temp2
             self.loss_max = loss_next
 
         # clip by (x_min, x_max)
-        xs_adv_next = tf.clip_by_value(xs_adv_next, self.model.x_min, self.model.x_max)
+        xs_adv_next = tf.clip_by_value(xs_adv_next_temp2, self.model.x_min, self.model.x_max)
 
         self.update_xs_adv_step = self.xs_adv_var.assign(xs_adv_next)
         self.config_eps_step = self.eps_var.assign(self.eps_ph)
@@ -116,14 +123,50 @@ class Attacker(BatchAttack):
 
     # In each step, call this function to calculate alpha and feed into alpha_ph
     def calculate_alpha(self, ):
-        pass
+        self.current_iteration += 1
+
+        # update loss
+        if (self.loss > self.last_loss):
+            self.better_f_count += 1
+        self.last_loss = self.loss
+
+        # update alpha
+        for j in range(self.checkpoint_count):
+            if self.current_iteration == self.checkpoint[j]:
+
+                # check condition 1
+                condition1 = False
+                interval_length = self.checkpoint[j] - self.checkpoint[j - 1]
+                hit_count = interval_length * self.rho
+                if (self.better_f_count < hit_count):
+                    condition1 = True
+
+                # check condition 2
+                condition2 = False
+                if (self.last_alpha == self.local_alpha and self.last_max_f == self.loss_max):
+                    condition2 = True
+
+                # halve alpha if necessary
+                if condition1 or condition2:
+                    self.local_alpha /= 2
+
+                # update parameters
+                self.better_f_count = 0
+                self.last_alpha = self.local_alpha * 2
+                self.last_max_f = self.loss_max
+
+                break
+
+        return self.local_alpha
+
 
     def config(self, **kwargs):
         if 'magnitude' in kwargs:
             self.eps = kwargs['magnitude'] - 1e-6
             eps = maybe_to_array(self.eps, self.batch_size)
             self._session.run(self.config_eps_step, feed_dict={self.eps_ph: eps})
-            self._session.run(self.config_alpha_step, feed_dict={self.alpha_ph: calculate_alpha()})
+            self._session.run(self.config_alpha_step, feed_dict={self.alpha_ph: self.eps * 2})
+            self.local_alpha = self.eps * 2
             # TODO (wwh): add momentum initialize here
             pass
 
@@ -134,5 +177,6 @@ class Attacker(BatchAttack):
         self._session.run(self.loss_max, feed_dict={self.xs_ph: xs, self.ys_ph: ys})
         # wwh: range -1 because of computation of x_max above
         for _ in range(self.iteration - 1):
+            self._session.run(self.config_alpha_step, feed_dict={self.alpha_ph: self.calculate_alpha()})
             self._session.run(self.update_xs_adv_step)
         return self._session.run(self.xs_adv_model)
