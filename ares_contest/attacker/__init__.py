@@ -146,14 +146,14 @@ class Attacker(BatchAttack):
                 if (self.last_alpha == self.local_alpha and self.last_max_f == self.loss_max):
                     condition2 = True
 
+                # update parameters
+                self.better_f_count = 0
+                self.last_alpha = self.local_alpha
+                self.last_max_f = self.loss_max
+
                 # halve alpha if necessary
                 if condition1 or condition2:
                     self.local_alpha /= 2
-
-                # update parameters
-                self.better_f_count = 0
-                self.last_alpha = self.local_alpha * 2
-                self.last_max_f = self.loss_max
 
                 break
 
