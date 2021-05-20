@@ -1,4 +1,5 @@
 import numpy as np
+import math
 import attacker.util as util
 import tensorflow.compat.v1 as tf
 from ares.attack.base import BatchAttack
@@ -11,13 +12,28 @@ class Attacker(BatchAttack):
         ''' Based on ares.attack.bim.BIM '''
         self.model, self.batch_size, self._session = model, batch_size, session
 
+        # Checkpoints for alpha
+        self.iteration_count = 100
+        self.checkpoint_count = 9  # 9 checkpoints, 8 intervals
+        self.p = [0, 0.22]
+        self.checkpoint = []
+        # Counters for alpha
+        self.rho = 0.75
+        self.iteration = 0
+
+        # Init checkpoints for alpha
+        for i in range(self.checkpoint_count - 2):
+            j = i + 1
+            self.p.append(self.p[j] + max(self.p[j] - self.p[j - 1] - 0.03, 0.06))
+        for position in self.p:
+            self.checkpoint.append(math.ceil(position * self.iteration_count))
+
         # dataset == "imagenet" or "cifar10"
         # loss = CrossEntropyLoss(self.model)
 
         # placeholder for batch_attack's input
         self.xs_ph = get_xs_ph(model, batch_size)
         self.ys_ph = get_ys_ph(model, batch_size)
-
 
         # flatten shape of xs_ph
         xs_flatten_shape = (batch_size, np.prod(self.model.x_shape))
@@ -39,7 +55,6 @@ class Attacker(BatchAttack):
         # step size
         self.alpha_ph = tf.placeholder(self.model.x_dtype, (self.batch_size,))
         self.alpha_var = tf.Variable(tf.zeros((self.batch_size,), dtype=self.model.x_dtype))
-
 
         # expand dim for easier broadcast operations
         eps = tf.expand_dims(self.eps_var, 1)
@@ -74,14 +89,14 @@ class Attacker(BatchAttack):
         # calculate loss' gradient with relate to the adversarial example
         # grad.shape == (batch_size, D)
         self.xs_adv_model = tf.reshape(self.xs_adv_var, (batch_size, *self.model.x_shape))
-        self.loss = util.dlr_loss(self.xs_adv_model, self.ys_var, self.model.n_class)
+        self.loss = util.dlr_loss(self.xs_adv_model, self.ys_var, self.model.n_class) #TODO loss
         grad = tf.gradients(self.loss, self.xs_adv_var)[0]
 
         # update the adversarial example
         xs_lo, xs_hi = self.xs_var - eps, self.xs_var + eps
 
         # clip by max l_inf magnitude of adversarial noise
-        xs_adv_next = tf.clip_by_value(self.xs_adv_var + alpha * grad, xs_lo, xs_hi) # wwh: z_k+1
+        xs_adv_next = tf.clip_by_value(self.xs_adv_var + alpha * grad, xs_lo, xs_hi)  # wwh: z_k+1
         xs_adv_next = tf.clip_by_value(self.xs_adv_var + momentum * (xs_adv_next - self.xs_adv_var) + (1 - momentum))
 
         loss_next = util.dlr_loss(xs_adv_next, self.ys_var, self.model.n_class)
@@ -99,20 +114,24 @@ class Attacker(BatchAttack):
         # TODO: check the number of iterations
         self.iteration = 100
 
+    # In each step, call this function to calculate alpha and feed into alpha_ph
+    def calculate_alpha(self, ):
+        pass
+
     def config(self, **kwargs):
         if 'magnitude' in kwargs:
             self.eps = kwargs['magnitude'] - 1e-6
             eps = maybe_to_array(self.eps, self.batch_size)
             self._session.run(self.config_eps_step, feed_dict={self.eps_ph: eps})
-            self._session.run(self.config_alpha_step, feed_dict={self.alpha_ph: eps / 7})
+            self._session.run(self.config_alpha_step, feed_dict={self.alpha_ph: calculate_alpha()})
             # TODO (wwh): add momentum initialize here
             pass
 
     def batch_attack(self, xs, ys=None, ys_target=None):
         self._session.run(self.setup_xs, feed_dict={self.xs_ph: xs})
         self._session.run(self.setup_ys, feed_dict={self.ys_ph: ys})
-        self._session.run(self.x_max, feed_dict={self.xs_ph:xs, self.ys_ph:ys})
-        self._session.run(self.loss_max, feed_dict={self.xs_ph:xs, self.ys_ph:ys})
+        self._session.run(self.x_max, feed_dict={self.xs_ph: xs, self.ys_ph: ys})
+        self._session.run(self.loss_max, feed_dict={self.xs_ph: xs, self.ys_ph: ys})
         # wwh: range -1 because of computation of x_max above
         for _ in range(self.iteration - 1):
             self._session.run(self.update_xs_adv_step)
