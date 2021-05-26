@@ -15,8 +15,10 @@ https://thu-ml-ares.readthedocs.io/en/latest/ 是比赛的官方教程, 但是�
 至此, 环境配置完毕.
 
 
+初始化：采用ODI。但攻击一定轮数后，在当前对抗样本基础上重新进行ODI（试图模仿Ye Liu dalao的EWR，虽然没有揣度出他的真正方法），想法是在攻击过程中，定时调整扰动的方向。
 
 
+Loss：采用CW loss。CW loss在许多攻击算法中都有应用，且相较于CE提升显著，而且很多黑盒攻击也是以CW loss作为loss oracle进行的攻击，总结一句话就是，CW，yyds。
 
 auto PGD 使用二阶动量, 类似 adam
 
