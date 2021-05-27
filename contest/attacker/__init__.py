@@ -11,7 +11,7 @@ class Attacker(BatchAttack):
     def __init__(self, model, batch_size, dataset, session):
         ''' Based on ares.attack.bim.BIM '''
         self.model, self.batch_size, self._session = model, batch_size, session
-
+        model_loss = CrossEntropyLoss(self.model)
         # Checkpoints for alpha
         self.iteration_count = 100
         self.checkpoint_count = 9  # 9 checkpoints, 8 intervals
@@ -76,28 +76,41 @@ class Attacker(BatchAttack):
                          self.xs_adv_var.assign(tf.reshape(self.xs_ph, xs_flatten_shape))]
         self.setup_ys = self.ys_var.assign(self.ys_ph)
         # 2 losses
-        self.loss = util.dlr_loss(self.xs_var, self.ys_var, self.model.n_class)
-        print(self.loss)
-        grad = tf.gradients(self.loss, self.xs_var)[0]
+        # TODO: alter loss to dlr_loss
+        self.xs_adv_model = tf.reshape(self.xs_adv_var, (batch_size, *self.model.x_shape))
+        self.loss = model_loss(self.xs_adv_model, self.ys_var)
+        # self.loss = util.dlr_loss(self.xs_adv_model, self.ys_var, self.model.n_class)
+        # grad shape: [batch_size, D]
+        grad = tf.gradients(self.loss, self.xs_adv_var)[0]
 
         xs_lo, xs_hi = self.xs_var - eps, self.xs_var + eps
+
         # clip by max l_inf magnitude of adversarial noise
         x1 = tf.clip_by_value(self.xs_adv_var + alpha * grad, xs_lo, xs_hi)
+        self.update_xs_adv_step1 = self.xs_adv_var.assign(x1)
 
         # update the adversarial example
-        loss1 = util.dlr_loss(x1, self.ys_var, self.model.n_class)
-        print(loss1)
+        # TODO: alter loss to dlr_loss
+        self.xs_adv_model = tf.reshape(self.xs_adv_var, (batch_size, *self.model.x_shape))
+        loss1 = model_loss(self.xs_adv_model, self.ys_var)
+        # loss1 = util.dlr_loss(self.xs_adv_model, self.ys_var, self.model.n_class)
+        grad = tf.gradients(loss1, self.xs_adv_var)[0]
+
+        x2 = tf.clip_by_value(self.xs_adv_var + alpha * grad, xs_lo, xs_hi)
+        self.update_xs_adv_step2 = self.xs_adv_var.assign(x2)
+
         self.loss_max = tf.reduce_max([self.loss, loss1])
-        if self.loss < loss1:
-            self.x_max = self.setup_xs
-        else:
-            self.x_max = x1
+        # TODO: loss!!!
+        print(self.loss)
+        print(loss1)
+        for i in range(batch_size):
+            self.x_max = tf.cond(self.loss[i] < loss1[i], lambda: self.setup_xs, lambda: x1)
 
         # start iterate
         # calculate loss' gradient with relate to the adversarial example
         # grad.shape == (batch_size, D)
         self.xs_adv_model = tf.reshape(self.xs_adv_var, (batch_size, *self.model.x_shape))
-        self.loss = util.dlr_loss(self.xs_adv_model, self.ys_var, self.model.n_class) #TODO loss
+        self.loss = model_loss(self.xs_adv_model, self.ys_var) # TODO: alter to dlr_loss
         grad = tf.gradients(self.loss, self.xs_adv_var)[0]
 
         # update the adversarial example
@@ -107,12 +120,10 @@ class Attacker(BatchAttack):
         self.xs_adv_var_temp1 = tf.Variable(tf.zeros(shape=xs_flatten_shape, dtype=self.model.x_dtype))
         self.xs_adv_var_temp2 = tf.Variable(tf.zeros(shape=xs_flatten_shape, dtype=self.model.x_dtype))
         xs_adv_next_temp1 = tf.clip_by_value(self.xs_adv_var + alpha * grad, xs_lo, xs_hi)  # wwh: z_k+1
-        xs_adv_next_temp2 = tf.clip_by_value(self.xs_adv_var + momentum * (xs_adv_next_temp1 - self.xs_adv_var) + (1 - momentum))
+        xs_adv_next_temp2 = tf.clip_by_value(self.xs_adv_var + momentum * (xs_adv_next_temp1 - self.xs_adv_var) + (1 - momentum), xs_lo, xs_hi)
 
         loss_next = util.dlr_loss(xs_adv_next_temp2, self.ys_var, self.model.n_class)
-        if loss_next > self.loss_max:
-            self.x_max = xs_adv_next_temp2
-            self.loss_max = loss_next
+        (self.x_max, self.loss_max) = tf.cond(loss_next[0] > self.loss_max[0], lambda: (xs_adv_next_temp2, loss_next), lambda: (self.x_max, self.loss_max))
 
         # clip by (x_min, x_max)
         xs_adv_next = tf.clip_by_value(xs_adv_next_temp2, self.model.x_min, self.model.x_max)
@@ -129,8 +140,7 @@ class Attacker(BatchAttack):
         self.current_iteration += 1
 
         # update loss
-        if self.loss > self.last_loss:
-            self.better_f_count += 1
+        self.better_f_count = tf.cond(self.loss[0] > self.last_loss[0], lambda: self.better_f_count + 1, lambda: self.better_f_count)
         self.last_loss = self.loss
 
         # update alpha
@@ -171,6 +181,10 @@ class Attacker(BatchAttack):
         self._session.run(self.setup_ys, feed_dict={self.ys_ph: ys})
         self._session.run(self.x_max, feed_dict={self.xs_ph: xs, self.ys_ph: ys})
         self._session.run(self.loss_max, feed_dict={self.xs_ph: xs, self.ys_ph: ys})
+        self._session.run(self.update_xs_adv_step1)
+        print("done 1")
+        self._session.run(self.update_xs_adv_step2)
+        print("done 2")
         # wwh: range -1 because of computation of x_max above
         for _ in range(self.iteration - 1):
             self._session.run(self.config_alpha_step, feed_dict={self.alpha_ph: self.calculate_alpha()})
