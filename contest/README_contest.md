@@ -37,7 +37,7 @@ optional arguments:
 To run the two example attacks we provided on all models, use the following command:
 
 ```bash
-$ python run_attacks.py --attacks attacker,numpy_attacker --output /tmp
+$ python run_attacks.py --attacks my_attacker --output ./tmp
 ```
 
 This command would write scores to `/tmp/attacker.csv` for `attacker/`, and `/tmp/numpy_attacker.csv` for `numpy_attacker/`. Since the two example attacks are two implementations of the same attack algorithm, they would get exactly same scores. We provide the content of `/tmp/attacker.csv` and `/tmp/numpy_attacker.csv` as following:

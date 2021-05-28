@@ -127,3 +127,7 @@ dmypy.json
 .vscode/
 
 third_party/
+
+tmp/
+
+contest/tmp/

@@ -22,3 +22,9 @@ Loss：采用CW loss。CW loss在许多攻击算法中都有应用，且相较�
 
 auto PGD 使用二阶动量, 类似 adam
 
+运行如下代码:
+
+```bash
+python run_attacks.py --attacks my_attacker --output ./tmp --models cifar10-pgd_at,imagenet-fast_at
+```
+
