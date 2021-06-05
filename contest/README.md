@@ -25,6 +25,6 @@ auto PGD 使用二阶动量, 类似 adam
 运行如下代码:
 
 ```bash
-python run_attacks.py --attacks my_attacker --output ./tmp --models imagenet-fast_at,imagenet-free_at
+python run_attacks.py --attacks attacker4 --output ./tmp --models cifar10-pgd_at,cifar10-wideresnet_trades,cifar10-feature_scatter,cifar10-robust_overfitting,cifar10-rst,cifar10-fast_at,cifar10-at_he,cifar10-pre_training,cifar10-free_at,cifar10-awp,cifar10-hydra,cifar10-label_smoothing
 ```
 

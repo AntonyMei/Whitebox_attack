@@ -7,7 +7,7 @@ import sys
 from sys import path
 path.append(sys.path[0]+'/attacker')
 
-# this attacker does experiment on only CW loss
+# this attacker does experiment on alternative times, CW loss
 class Attacker(BatchAttack):
     def __init__(self, model, batch_size, dataset, session):
         """ Based on ares.attack.bim.BIM, numpy version. """
@@ -125,9 +125,9 @@ class Attacker(BatchAttack):
         update_vector = np.ones(xs.shape)
         replace_vector = np.zeros(xs.shape)
         xs_adv = xs
-        start_times = 14
+        start_times = 5
         ODI_times = 2
-        iter_times = 5
+        iter_times = 18
         min_step = self.alpha / 4
         best_per = xs_adv
         rand = False
