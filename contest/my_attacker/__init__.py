@@ -131,7 +131,6 @@ class Attacker(BatchAttack):
 
         if self.dataset == 'cifar10':
             if important_logits < 3.2 :
-                print("run 2 times")
                 start_times = 14
                 ODI_times = 2
                 iter_times = 5

@@ -7,7 +7,7 @@ import sys
 from sys import path
 path.append(sys.path[0]+'/attacker')
 
-# this attacker does experiment on CW loss
+# this attacker does experiment on CE loss
 class Attacker(BatchAttack):
     def __init__(self, model, batch_size, dataset, session):
         """ Based on ares.attack.bim.BIM, numpy version. """
@@ -41,9 +41,13 @@ class Attacker(BatchAttack):
         CW_wrong_logit = tf.reduce_max((1 - label_mask) * self.logits - 1e4 * label_mask, axis=1)
         self.CW_margin_loss = CW_wrong_logit - CW_correct_logit
 
+        # CE Loss
+        self.CE_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(labels = self.ys_ph, logits = self.logits)
+
         # gradients
         self.SCW_grad = tf.gradients(self.SCW_margin_loss, self.xs_ph)[0]
         self.CW_grad = tf.gradients(self.CW_margin_loss, self.xs_ph)[0]
+        self.CE_grad = tf.gradients(self.CE_loss, self.xs_ph)[0]
 
         # random direction
         self.rand_direct = tf.Variable(np.zeros((self.batch_size, self.class_num)).astype(np.float32),
@@ -56,6 +60,9 @@ class Attacker(BatchAttack):
 
         self.CW_ODI_loss = tf.tensordot(self.logits, self.rand_direct, axes=[[0, 1], [0, 1]])
         self.CW_grad_ODI = tf.gradients(self.CW_ODI_loss, self.xs_ph)[0]
+
+        self.CE_ODI_loss = tf.tensordot(self.logits, self.rand_direct, axes = [[0, 1], [0, 1]])
+        self.CE_grad_ODI = tf.gradients(self.CE_ODI_loss, self.xs_ph)[0]
 
     def config(self, **kwargs):
         if 'magnitude' in kwargs:
@@ -145,7 +152,7 @@ class Attacker(BatchAttack):
                             ys = ys,
                             update_vector = update_vector,
                             replace_vector = replace_vector,
-                            gradODI = self.CW_grad_ODI,
-                            self_grad = self.CW_grad)
+                            gradODI = self.CE_grad_ODI,
+                            self_grad = self.CE_grad)
 
         return xs_adv
