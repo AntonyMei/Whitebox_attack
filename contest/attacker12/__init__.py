@@ -7,7 +7,7 @@ import sys
 from sys import path
 path.append(sys.path[0]+'/attacker')
 
-# this attacker does experiment on CW loss, with initial randomization
+# this attacker does experiment on CE loss, with initial randomization
 class Attacker(BatchAttack):
     def __init__(self, model, batch_size, dataset, session):
         """ Based on ares.attack.bim.BIM, numpy version. """
@@ -23,39 +23,46 @@ class Attacker(BatchAttack):
 
         label_mask = tf.one_hot(self.ys_ph,
                                 self.class_num,
-                                on_value=1.0,
-                                off_value=0.0,
-                                dtype=tf.float32)
+                                on_value = 1.0,
+                                off_value = 0.0,
+                                dtype = tf.float32)
 
         # softmax(logit) work better on other networks than cifar10, while logit work better on cifar10
 
         # SCW Loss
         self.softmax = tf.nn.softmax(self.logits)
-        SCW_correct_logit = tf.reduce_sum(label_mask * self.softmax, axis=1)
+        SCW_correct_logit = tf.reduce_sum(label_mask * self.softmax, axis = 1)
         # 1e4: let the correct logit be small, correct implementation
-        SCW_wrong_logit = tf.reduce_max((1 - label_mask) * self.softmax - 1e4 * label_mask, axis=1)
+        SCW_wrong_logit = tf.reduce_max((1 - label_mask) * self.softmax - 1e4 * label_mask, axis = 1)
         self.SCW_margin_loss = -tf.nn.relu(SCW_correct_logit - SCW_wrong_logit + 50.)
 
         # CW Loss
-        CW_correct_logit = tf.reduce_sum(label_mask * self.logits, axis=1)
-        CW_wrong_logit = tf.reduce_max((1 - label_mask) * self.logits - 1e4 * label_mask, axis=1)
+        CW_correct_logit = tf.reduce_sum(label_mask * self.logits, axis = 1)
+        CW_wrong_logit = tf.reduce_max((1 - label_mask) * self.logits - 1e4 * label_mask, axis = 1)
         self.CW_margin_loss = CW_wrong_logit - CW_correct_logit
+
+        # CE Loss
+        self.CE_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(labels = self.ys_ph, logits = self.logits)
 
         # gradients
         self.SCW_grad = tf.gradients(self.SCW_margin_loss, self.xs_ph)[0]
         self.CW_grad = tf.gradients(self.CW_margin_loss, self.xs_ph)[0]
+        self.CE_grad = tf.gradients(self.CE_loss, self.xs_ph)[0]
 
         # random direction
         self.rand_direct = tf.Variable(np.zeros((self.batch_size, self.class_num)).astype(np.float32),
-                                       name='rand_direct')
-        self.rand_placeholder = tf.placeholder(tf.float32, shape=[self.batch_size, self.class_num])
+                                       name = 'rand_direct')
+        self.rand_placeholder = tf.placeholder(tf.float32, shape = [self.batch_size, self.class_num])
         self.assign_op = self.rand_direct.assign(self.rand_placeholder)
 
-        self.SCW_ODI_loss = tf.tensordot(self.softmax, self.rand_direct, axes=[[0, 1], [0, 1]])
+        self.SCW_ODI_loss = tf.tensordot(self.softmax, self.rand_direct, axes = [[0, 1], [0, 1]])
         self.SCW_grad_ODI = tf.gradients(self.SCW_ODI_loss, self.xs_ph)[0]
 
-        self.CW_ODI_loss = tf.tensordot(self.logits, self.rand_direct, axes=[[0, 1], [0, 1]])
+        self.CW_ODI_loss = tf.tensordot(self.logits, self.rand_direct, axes = [[0, 1], [0, 1]])
         self.CW_grad_ODI = tf.gradients(self.CW_ODI_loss, self.xs_ph)[0]
+
+        self.CE_ODI_loss = tf.tensordot(self.logits, self.rand_direct, axes = [[0, 1], [0, 1]])
+        self.CE_grad_ODI = tf.gradients(self.CE_ODI_loss, self.xs_ph)[0]
 
     def config(self, **kwargs):
         if 'magnitude' in kwargs:
@@ -145,7 +152,7 @@ class Attacker(BatchAttack):
                             ys = ys,
                             update_vector = update_vector,
                             replace_vector = replace_vector,
-                            gradODI = self.CW_grad_ODI,
-                            self_grad = self.CW_grad)
+                            gradODI = self.CE_grad_ODI,
+                            self_grad = self.CE_grad)
 
         return xs_adv

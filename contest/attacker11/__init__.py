@@ -7,7 +7,7 @@ import sys
 from sys import path
 path.append(sys.path[0]+'/attacker')
 
-# this attacker does experiment on CW loss, with initial randomization
+# this attacker does experiment on SCW loss, with initial randomization
 class Attacker(BatchAttack):
     def __init__(self, model, batch_size, dataset, session):
         """ Based on ares.attack.bim.BIM, numpy version. """
@@ -145,7 +145,7 @@ class Attacker(BatchAttack):
                             ys = ys,
                             update_vector = update_vector,
                             replace_vector = replace_vector,
-                            gradODI = self.CW_grad_ODI,
-                            self_grad = self.CW_grad)
+                            gradODI = self.SCW_grad_ODI,
+                            self_grad = self.SCW_grad)
 
         return xs_adv
