@@ -126,11 +126,11 @@ class Attacker(BatchAttack):
         replace_vector = np.zeros(xs.shape)
         xs_adv = xs
 
-        important_logits_all = self._session.run(self.logits, feed_dict={self.xs_ph: xs, self.ys_ph: ys})
-        important_logits = np.max(important_logits_all)
+        crucial_logits = self._session.run(self.logits, feed_dict={self.xs_ph: xs, self.ys_ph: ys})
+        crucial_logit = np.max(crucial_logits)
 
         if self.dataset == 'cifar10':
-            if important_logits < 3.2 :
+            if crucial_logit < 3.2 :
                 start_times = 14
                 ODI_times = 2
                 iter_times = 5
